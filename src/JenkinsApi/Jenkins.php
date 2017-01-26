@@ -235,8 +235,9 @@ class Jenkins
 
         curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
         curl_setopt($curl, CURLOPT_HTTPHEADER, $headers);
-        $return = curl_exec($curl);
+        curl_setopt($curl, CURLOPT_RETURNTRANSFER, 1);
 
+        $return = curl_exec($curl);
         return (curl_errno($curl)) ?: $return;
     }
 
