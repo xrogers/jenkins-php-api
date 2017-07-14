@@ -38,27 +38,27 @@ class Jenkins
     /**
      * @var bool
      */
-    private $_verbose = false;
+    protected $verbose = false;
 
     /**
      * @var string
      */
-    private $_baseUrl;
+    protected $baseUrl;
 
     /**
      * @var string
      */
-    private $_username;
+    protected $username;
 
     /**
      * @var string
      */
-    private $_password;
+    protected $password;
 
     /**
      * @var string
      */
-    private $_urlExtension = '/api/json';
+    protected $urlExtension = '/api/json';
 
     /**
      * Whether or not to retrieve and send anti-CSRF crumb tokens
@@ -68,7 +68,7 @@ class Jenkins
      *
      * @var boolean
      */
-    private $_crumbsEnabled = false;
+    protected $crumbsEnabled = false;
 
     /**
      * The anti-CSRF crumb to use for each request
@@ -77,7 +77,7 @@ class Jenkins
      *
      * @var string
      */
-    private $_crumb;
+    protected $crumb;
 
     /**
      * The header to use for sending anti-CSRF crumbs
@@ -86,16 +86,31 @@ class Jenkins
      *
      * @var string
      */
-    private $_crumbRequestField;
+    protected $crumbRequestField;
+
+    /**
+     * @var null|string
+     */
+    protected $proxyUrl;
+    /**
+     * @var array
+     */
+    protected $customCurlSettings;
 
     /**
      * @param string $baseUrl
+     * @param string $username
+     * @param string $password
+     * @param string $proxyUrl
+     * @param array $customCurlSettings
      */
-    public function __construct($baseUrl, $username = '', $password = '')
+    public function __construct($baseUrl, $username = '', $password = '', $proxyUrl = null, $customCurlSettings = [])
     {
-        $this->_baseUrl = $baseUrl . ((substr($baseUrl, -1) === '/') ? '' : '/');
-        $this->_username = $username;
-        $this->_password = $password;
+        $this->baseUrl = $baseUrl . ((substr($baseUrl, -1) === '/') ? '' : '/');
+        $this->username = $username;
+        $this->password = $password;
+        $this->proxyUrl = $proxyUrl;
+        $this->customCurlSettings = $customCurlSettings;
     }
 
     /**
@@ -145,32 +160,31 @@ class Jenkins
 
     /**
      * @param string $url
-     * @param int    $depth
-     * @param array  $params
-     * @param array  $curlOpts
-     * @param bool   $raw
-     *
-     * @throws RuntimeException
+     * @param int $depth
+     * @param array $params
+     * @param array $curlOpts
+     * @param bool $raw
      * @return stdClass
+     * @throws JenkinsApiException
      */
     public function get($url, $depth = 1, $params = array(), array $curlOpts = [], $raw = false)
     {
 //        $url = str_replace(' ', '%20', sprintf('%s' . $url . '?depth=' . $depth, $this->_baseUrl));
-        $url = sprintf('%s', $this->_baseUrl) . $url . '?depth=' . $depth;
+        $url = sprintf('%s', $this->baseUrl) . $url . '?depth=' . $depth;
         if ($params) {
             foreach ($params as $key => $val) {
                 $url .= '&' . $key . '=' . $val;
             }
         }
-        $curl = curl_init($url);
+        $curl = $this->initCurl($url);
         if ($curlOpts) {
             curl_setopt_array($curl, $curlOpts);
         }
         curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, 1);
 
-        if ($this->_username) {
-            curl_setopt($curl, CURLOPT_USERPWD, $this->_username . ":" . $this->_password);
+        if ($this->username) {
+            curl_setopt($curl, CURLOPT_USERPWD, $this->username . ":" . $this->password);
         }
 
         $ret = curl_exec($curl);
@@ -211,9 +225,9 @@ class Jenkins
      */
     public function post($url, $parameters = [], array $curlOpts = [])
     {
-        $url = sprintf('%s', $this->_baseUrl) . $url;
+        $url = sprintf('%s', $this->baseUrl) . $url;
 
-        $curl = curl_init($url);
+        $curl = $this->initCurl($url);
         if ($curlOpts) {
             curl_setopt_array($curl, $curlOpts);
         }
@@ -223,8 +237,8 @@ class Jenkins
         }
         curl_setopt($curl, CURLOPT_POSTFIELDS, $parameters);
 
-        if ($this->_username) {
-            curl_setopt($curl, CURLOPT_USERPWD, $this->_username . ":" . $this->_password);
+        if ($this->username) {
+            curl_setopt($curl, CURLOPT_USERPWD, $this->username . ":" . $this->password);
         }
 
         $headers = (isset($curlOpts[CURLOPT_HTTPHEADER])) ? $curlOpts[CURLOPT_HTTPHEADER] : array();
@@ -246,11 +260,11 @@ class Jenkins
      */
     public function isAvailable()
     {
-        $curl = curl_init($this->_baseUrl . '/api/json');
+        $curl = $this->initCurl($this->baseUrl . '/api/json');
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, 1);
 
-        if ($this->_username) {
-            curl_setopt($curl, CURLOPT_USERPWD, $this->_username . ":" . $this->_password);
+        if ($this->username) {
+            curl_setopt($curl, CURLOPT_USERPWD, $this->username . ":" . $this->password);
         }
 
         curl_exec($curl);
@@ -270,7 +284,7 @@ class Jenkins
 
     public function getCrumbHeader()
     {
-        return "$this->_crumbRequestField: $this->_crumb";
+        return "$this->crumbRequestField: $this->crumb";
     }
 
     /**
@@ -280,19 +294,19 @@ class Jenkins
      */
     public function areCrumbsEnabled()
     {
-        return $this->_crumbsEnabled;
+        return $this->crumbsEnabled;
     }
 
     public function requestCrumb()
     {
-        $url = sprintf('%s/crumbIssuer/api/json', $this->_baseUrl);
+        $url = sprintf('%s/crumbIssuer/api/json', $this->baseUrl);
 
-        $curl = curl_init($url);
+        $curl = $this->initCurl($url);
 
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, 1);
 
-        if ($this->_username) {
-            curl_setopt($curl, CURLOPT_USERPWD, $this->_username . ":" . $this->_password);
+        if ($this->username) {
+            curl_setopt($curl, CURLOPT_USERPWD, $this->username . ":" . $this->password);
         }
 
         $ret = curl_exec($curl);
@@ -317,18 +331,18 @@ class Jenkins
      */
     public function enableCrumbs()
     {
-        $this->_crumbsEnabled = true;
+        $this->crumbsEnabled = true;
 
         $crumbResult = $this->requestCrumb();
 
         if (!$crumbResult || !is_object($crumbResult)) {
-            $this->_crumbsEnabled = false;
+            $this->crumbsEnabled = false;
 
             return;
         }
 
-        $this->_crumb = $crumbResult->crumb;
-        $this->_crumbRequestField = $crumbResult->crumbRequestField;
+        $this->crumb = $crumbResult->crumb;
+        $this->crumbRequestField = $crumbResult->crumbRequestField;
     }
 
     /**
@@ -342,16 +356,16 @@ class Jenkins
     {
         $url = sprintf(
             '%s/api/xml?%s',
-            $this->_baseUrl,
+            $this->baseUrl,
             'tree=jobs[name,url,color]&xpath=/hudson/job[ends-with(color/text(),%22_anime%22)]&wrapper=jobs'
         );
 
-        $curl = curl_init($url);
+        $curl = $this->initCurl($url);
 
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, 1);
 
-        if ($this->_username) {
-            curl_setopt($curl, CURLOPT_USERPWD, $this->_username . ":" . $this->_password);
+        if ($this->username) {
+            curl_setopt($curl, CURLOPT_USERPWD, $this->username . ":" . $this->password);
         }
 
         $ret = curl_exec($curl);
@@ -359,7 +373,7 @@ class Jenkins
         if (curl_errno($curl)) {
             throw new JenkinsApiException(
                 sprintf(
-                    'Error during getting all currently building jobs on %s (%s)', $this->_baseUrl, curl_error($curl)
+                    'Error during getting all currently building jobs on %s (%s)', $this->baseUrl, curl_error($curl)
                 )
             );
         }
@@ -429,38 +443,31 @@ class Jenkins
      * @param string $jobname
      * @param string $xmlConfiguration
      *
-     * @throws InvalidArgumentException
-     * @return void
+     * @param string $project
+     * @throws JenkinsApiException
      */
-    public function createJob($jobname, $xmlConfiguration)
+    public function createJob($jobname, $xmlConfiguration, $project = null)
     {
-        $url = sprintf('%s/createItem?name=%s', $this->getBaseUrl(), $jobname);
-        $curl = curl_init($url);
-        curl_setopt($curl, CURLOPT_POST, 1);
-
-        curl_setopt($curl, CURLOPT_POSTFIELDS, $xmlConfiguration);
-        curl_setopt($curl, CURLOPT_RETURNTRANSFER, 1);
-
-        if ($this->_username) {
-            curl_setopt($curl, CURLOPT_USERPWD, $this->_username . ":" . $this->_password);
+        $baseUrl =  $this->getBaseUrl();
+        if ($project) {
+            $baseUrl .= 'job/'.rawurlencode($project);
         }
 
-        $headers = array('Content-Type: text/xml');
+        $url = sprintf('%s/createItem?name=%s', $baseUrl, rawurlencode($jobname));
 
-        if ($this->areCrumbsEnabled()) {
-            $headers[] = $this->getCrumbHeader();
+        $this->postJob($jobname, $xmlConfiguration, $url);
+    }
+
+    public function updateJob($jobname, $xmlConfiguration, $project = null)
+    {
+        $baseUrl =  $this->getBaseUrl();
+        if ($project) {
+            $baseUrl .= 'job/'.rawurlencode($project);
         }
 
-        curl_setopt($curl, CURLOPT_HTTPHEADER, $headers);
+        $url = sprintf('%s/job/%s/config.xml', $baseUrl, rawurlencode($jobname));
 
-        $response = curl_exec($curl);
-
-        if (curl_getinfo($curl, CURLINFO_HTTP_CODE) != 200) {
-            throw new InvalidArgumentException(sprintf('Job %s already exists', $jobname));
-        }
-        if (curl_errno($curl)) {
-            throw new JenkinsApiException(sprintf('Error creating job %s (%s)', $jobname, curl_error($curl)));
-        }
+        $this->postJob($jobname, $xmlConfiguration, $url);
     }
 
     /**
@@ -521,7 +528,7 @@ class Jenkins
      */
     public function disableCrumbs()
     {
-        $this->_crumbsEnabled = false;
+        $this->crumbsEnabled = false;
     }
 
     /**
@@ -529,7 +536,7 @@ class Jenkins
      */
     public function getUrlExtension()
     {
-        return $this->_urlExtension;
+        return $this->urlExtension;
     }
 
     /**
@@ -537,7 +544,7 @@ class Jenkins
      */
     public function setUrlExtension($urlExtension)
     {
-        $this->_urlExtension = $urlExtension;
+        $this->urlExtension = $urlExtension;
     }
 
     /**
@@ -545,7 +552,7 @@ class Jenkins
      */
     public function getBaseUrl()
     {
-        return $this->_baseUrl;
+        return $this->baseUrl;
     }
 
     /**
@@ -553,7 +560,7 @@ class Jenkins
      */
     public function setBaseUrl($baseUrl)
     {
-        $this->_baseUrl = $baseUrl;
+        $this->baseUrl = $baseUrl;
     }
 
     /**
@@ -561,7 +568,7 @@ class Jenkins
      */
     public function isVerbose()
     {
-        return $this->_verbose;
+        return $this->verbose;
     }
 
     /**
@@ -569,6 +576,61 @@ class Jenkins
      */
     public function setVerbose($verbose)
     {
-        $this->_verbose = $verbose;
+        $this->verbose = $verbose;
+    }
+
+    /**
+     * @param $url
+     * @return resource
+     */
+    protected function initCurl($url)
+    {
+        $ch = curl_init($url);
+
+        if ($this->proxyUrl) {
+            curl_setopt($ch, CURLOPT_PROXY, $this->proxyUrl);
+        }
+
+        if ($this->customCurlSettings) {
+            curl_setopt_array($ch, $this->customCurlSettings);
+        }
+
+        return $ch;
+    }
+
+    /**
+     * @param $jobname
+     * @param $xmlConfiguration
+     * @param $url
+     * @throws JenkinsApiException
+     */
+    protected function postJob($jobname, $xmlConfiguration, $url): void
+    {
+        $curl = $this->initCurl($url);
+        curl_setopt($curl, CURLOPT_POST, 1);
+
+        curl_setopt($curl, CURLOPT_POSTFIELDS, $xmlConfiguration);
+        curl_setopt($curl, CURLOPT_RETURNTRANSFER, 1);
+
+        if ($this->username) {
+            curl_setopt($curl, CURLOPT_USERPWD, $this->username.":".$this->password);
+        }
+
+        $headers = array('Content-Type: text/xml');
+
+        if ($this->areCrumbsEnabled()) {
+            $headers[] = $this->getCrumbHeader();
+        }
+
+        curl_setopt($curl, CURLOPT_HTTPHEADER, $headers);
+
+        $response = curl_exec($curl);
+
+        if (curl_getinfo($curl, CURLINFO_HTTP_CODE) != 200) {
+            throw new InvalidArgumentException(sprintf('Job %s already exists', $jobname));
+        }
+        if (curl_errno($curl)) {
+            throw new JenkinsApiException(sprintf('Error creating job %s (%s)', $jobname, curl_error($curl)));
+        }
     }
 }
