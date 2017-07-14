@@ -604,7 +604,7 @@ class Jenkins
      * @param $url
      * @throws JenkinsApiException
      */
-    protected function postJob($jobname, $xmlConfiguration, $url): void
+    protected function postJob($jobname, $xmlConfiguration, $url)
     {
         $curl = $this->initCurl($url);
         curl_setopt($curl, CURLOPT_POST, 1);
